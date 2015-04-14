@@ -157,11 +157,11 @@ static int RUU_size = 8;
 /* load/store queue (LSQ) size */
 static int LSQ_size = 4;
 
-/* l1 data cache config, i.e., {<config>|none} */
-static char *cache_dl1_opt;
-
 /* Column Assoc Cache*/
 static char* cache_psuedoassoc_opt;
+
+/* l1 data cache config, i.e., {<config>|none} */
+static char *cache_dl1_opt;
 
 /* l1 data cache hit latency (in cycles) */
 static int cache_dl1_lat;
@@ -171,6 +171,12 @@ static char *cache_dl2_opt;
 
 /* l2 data cache hit latency (in cycles) */
 static int cache_dl2_lat;
+
+/* l3 data cache config, i.e., {<config>|none} */
+static char *cache_dl3_opt;
+
+/* l3 data cache hit latency (in cycles) */
+//static int cache_dl3_lat;
 
 /* l1 instruction cache config, i.e., {<config>|dl1|dl2|none} */
 static char *cache_il1_opt;
@@ -183,6 +189,12 @@ static char *cache_il2_opt;
 
 /* l2 instruction cache hit latency (in cycles) */
 static int cache_il2_lat;
+
+/* l3 instruction cache config, i.e., {<config>|dl1|dl2|none} */
+static char *cache_il3_opt;
+
+/* l3 instruction cache hit latency (in cycles) */
+//static int cache_il3_lat;
 
 /* flush caches on system calls */
 static int flush_on_syscalls;
@@ -376,11 +388,17 @@ static struct cache_t *cache_il1;
 /* level 1 instruction cache */
 static struct cache_t *cache_il2;
 
+/* level 3 instruction cache */
+static struct cache_t *cache_il3;
+
 /* level 1 data cache, entry level data cache */
 static struct cache_t *cache_dl1;
 
 /* level 2 data cache */
 static struct cache_t *cache_dl2;
+
+/* level 3 data cache */
+static struct cache_t *cache_dl3;
 
 /* instruction TLB */
 static struct cache_t *itlb;
@@ -471,6 +489,40 @@ dl2_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
 	      struct cache_blk_t *blk,	/* ptr to block in upper level */
 	      tick_t now)		/* time of access */
 {
+  unsigned int lat;
+  if(cache_dl3){
+      /* access next level of data cache hierarchy */
+      lat = cache_access(cache_dl3, cmd, baddr, NULL, bsize,
+                         /* now */now, /* pudata */NULL, /* repl addr */NULL);
+      if (cmd == Read)
+        return lat;
+      else
+        {
+          /* FIXME: unlimited write buffers */
+          return 0;
+        }
+  }
+  else{
+  /* this is a miss to the lowest level, so access main memory */
+      if (cmd == Read)
+        return mem_access_latency(bsize);
+      else
+        {
+          /* FIXME: unlimited write buffers */
+          return 0;
+        }
+  }
+
+}
+
+/* l3 data cache block miss handler function */
+static unsigned int			/* latency of block access */
+dl3_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
+          md_addr_t baddr,		/* block address to access */
+          int bsize,		/* size of block to access */
+          struct cache_blk_t *blk,	/* ptr to block in upper level */
+          tick_t now)		/* time of access */
+{
   /* this is a miss to the lowest level, so access main memory */
   if (cmd == Read)
     return mem_access_latency(bsize);
@@ -514,6 +566,36 @@ if (cache_il2)
 /* l2 inst cache block miss handler function */
 static unsigned int			/* latency of block access */
 il2_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
+	      md_addr_t baddr,		/* block address to access */
+	      int bsize,		/* size of block to access */
+	      struct cache_blk_t *blk,	/* ptr to block in upper level */
+	      tick_t now)		/* time of access */
+{
+  unsigned int lat;
+  if (cache_il3)
+    {
+      /* access next level of inst cache hierarchy */
+      lat = cache_access(cache_il3, cmd, baddr, NULL, bsize,
+                         /* now */now, /* pudata */NULL, /* repl addr */NULL);
+      if (cmd == Read)
+        return lat;
+      else
+        panic("writes to instruction memory not supported");
+    }
+  else
+    {
+      /* access main memory */
+      /* this is a miss to the lowest level, so access main memory */
+      if (cmd == Read)
+        return mem_access_latency(bsize);
+      else
+        panic("writes to instruction memory not supported");
+    }
+}
+
+/* l3 inst cache block miss handler function */
+static unsigned int			/* latency of block access */
+il3_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
 	      md_addr_t baddr,		/* block address to access */
 	      int bsize,		/* size of block to access */
 	      struct cache_blk_t *blk,	/* ptr to block in upper level */
@@ -773,6 +855,11 @@ sim_reg_options(struct opt_odb_t *odb)
 		 &cache_dl2_opt, "ul2:1024:64:4:l",
 		 /* print */TRUE, NULL);
 
+  opt_reg_string(odb, "-cache:dl3",
+                 "l3 data cache config, i.e., {<config>|none}",
+                 &cache_dl3_opt, "ul3:1024:64:4:l",
+                 /* print */TRUE, NULL);
+
   opt_reg_int(odb, "-cache:dl2lat",
 	      "l2 data cache hit latency (in cycles)",
 	      &cache_dl2_lat, /* default */6,
@@ -806,6 +893,11 @@ sim_reg_options(struct opt_odb_t *odb)
 		 "l2 instruction cache config, i.e., {<config>|dl2|none}",
 		 &cache_il2_opt, "dl2",
 		 /* print */TRUE, NULL);
+
+  opt_reg_string(odb, "-cache:il3",
+                 "l3 instruction cache config, i.e., {<config>|dl3|none}",
+                 &cache_il3_opt, "dl3",
+                 /* print */TRUE, NULL);
 
   opt_reg_int(odb, "-cache:il2lat",
 	      "l2 instruction cache hit latency (in cycles)",
@@ -1020,31 +1112,55 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 
       /* the level 2 D-cache cannot be defined */
       if (strcmp(cache_dl2_opt, "none"))
-	fatal("the l1 data cache must defined if the l2 cache is defined");
+        fatal("the l1 data cache must defined if the l2 cache is defined");
       cache_dl2 = NULL;
+
+      /* the level 3 D-cache cannot be defined */
+      if (strcmp(cache_dl3_opt, "none"))
+        fatal("the l1 data cache must defined if the l3 cache is defined");
+      cache_dl3 = NULL;
     }
   else /* dl1 is defined */
     {
       if (sscanf(cache_dl1_opt, "%[^:]:%d:%d:%d:%c",
-		 name, &nsets, &bsize, &assoc, &c) != 5)
-	fatal("bad l1 D-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
+                 name, &nsets, &bsize, &assoc, &c) != 5)
+        fatal("bad l1 D-cache parms: <name>:<nsets>:<bsize>:<assoc>:<repl>");
       cache_dl1 = cache_create(name, nsets, bsize, /* balloc */FALSE,
-			       /* usize */0, assoc, cache_char2policy(c),
-			       dl1_access_fn, /* hit lat */cache_dl1_lat);
+                               /* usize */0, assoc, cache_char2policy(c),
+                               dl1_access_fn, /* hit lat */cache_dl1_lat);
 
       /* is the level 2 D-cache defined? */
-      if (!mystricmp(cache_dl2_opt, "none"))
-	cache_dl2 = NULL;
+      if (!mystricmp(cache_dl2_opt, "none")){
+          cache_dl2 = NULL;
+          /* the level 3 D-cache cannot be defined */
+          if (strcmp(cache_dl3_opt, "none"))
+            fatal("the l2 data cache must defined if the l3 cache is defined");
+          cache_dl3 = NULL;
+        }
       else
-	{
-	  if (sscanf(cache_dl2_opt, "%[^:]:%d:%d:%d:%c",
-		     name, &nsets, &bsize, &assoc, &c) != 5)
-	    fatal("bad l2 D-cache parms: "
-		  "<name>:<nsets>:<bsize>:<assoc>:<repl>");
-	  cache_dl2 = cache_create(name, nsets, bsize, /* balloc */FALSE,
-				   /* usize */0, assoc, cache_char2policy(c),
-				   dl2_access_fn, /* hit lat */cache_dl2_lat);
-	}
+        {
+          if (sscanf(cache_dl2_opt, "%[^:]:%d:%d:%d:%c",
+                     name, &nsets, &bsize, &assoc, &c) != 5)
+            fatal("bad l2 D-cache parms: "
+                  "<name>:<nsets>:<bsize>:<assoc>:<repl>");
+          cache_dl2 = cache_create(name, nsets, bsize, /* balloc */FALSE,
+                                   /* usize */0, assoc, cache_char2policy(c),
+                                   dl2_access_fn, /* hit lat */cache_dl2_lat);
+
+          /* is the level 3 D-cache defined? */
+          if (!mystricmp(cache_dl3_opt, "none"))
+            cache_dl3 = NULL;
+          else
+            {
+              if (sscanf(cache_dl3_opt, "%[^:]:%d:%d:%d:%c",
+                         name, &nsets, &bsize, &assoc, &c) != 5)
+                fatal("bad l3 D-cache parms: "
+                      "<name>:<nsets>:<bsize>:<assoc>:<repl>");
+              cache_dl3 = cache_create(name, nsets, bsize, /* balloc */FALSE,
+                                       /* usize */0, assoc, cache_char2policy(c),
+                                       dl3_access_fn, /* hit latency */1);
+            }
+        }
     }
 
   /* use a level 1 I-cache? */
@@ -1056,6 +1172,12 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (strcmp(cache_il2_opt, "none"))
 	fatal("the l1 inst cache must defined if the l2 cache is defined");
       cache_il2 = NULL;
+
+      /* the level 3 I-cache cannot be defined */
+      if (strcmp(cache_il3_opt, "none"))
+        fatal("the l1 inst cache must defined if the l3 cache is defined");
+      cache_il3 = NULL;
+
     }
   else if (!mystricmp(cache_il1_opt, "dl1"))
     {
@@ -1067,17 +1189,33 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
       if (strcmp(cache_il2_opt, "none"))
 	fatal("the l1 inst cache must defined if the l2 cache is defined");
       cache_il2 = NULL;
+
+      /* the level 3 I-cache cannot be defined */
+      if (strcmp(cache_il3_opt, "none"))
+        fatal("the l1 inst cache must defined if the l3 cache is defined");
+      cache_il3 = NULL;
     }
   else if (!mystricmp(cache_il1_opt, "dl2"))
     {
       if (!cache_dl2)
-	fatal("I-cache l1 cannot access D-cache l2 as it's undefined");
+        fatal("I-cache l1 cannot access D-cache l2 as it's undefined");
       cache_il1 = cache_dl2;
 
       /* the level 2 I-cache cannot be defined */
       if (strcmp(cache_il2_opt, "none"))
-	fatal("the l1 inst cache must defined if the l2 cache is defined");
+        fatal("the l1 inst cache must defined if the l2 cache is defined");
       cache_il2 = NULL;
+
+      /* the level 3 I-cache cannot be defined */
+      if (strcmp(cache_il3_opt, "none"))
+        fatal("the l1 inst cache must defined if the l3 cache is defined");
+      cache_il3 = NULL;
+    }
+  else if (!mystricmp(cache_il1_opt, "dl3"))
+    {
+      if (!cache_dl3)
+        fatal("I-cache l1 cannot access D-cache l3 as it's undefined");
+      cache_il1 = cache_dl3;
     }
   else /* il1 is defined */
     {
@@ -1089,14 +1227,30 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 			       il1_access_fn, /* hit lat */cache_il1_lat);
 
       /* is the level 2 D-cache defined? */
-      if (!mystricmp(cache_il2_opt, "none"))
+      if (!mystricmp(cache_il2_opt, "none")){
 	cache_il2 = NULL;
+	/* the level 3 I-cache cannot be defined */
+	if (strcmp(cache_il3_opt, "none"))
+	  fatal("the l2 inst cache must defined if the l3 cache is defined");
+	cache_il3 = NULL;
+	}
       else if (!mystricmp(cache_il2_opt, "dl2"))
 	{
 	  if (!cache_dl2)
 	    fatal("I-cache l2 cannot access D-cache l2 as it's undefined");
 	  cache_il2 = cache_dl2;
+
+          /* the level 3 I-cache cannot be defined */
+          //if (strcmp(cache_il3_opt, "none"))
+          //  fatal("the l2 inst cache must defined if the l3 cache is defined");
+          cache_il3 = NULL;
 	}
+      else if (!mystricmp(cache_il2_opt, "dl3"))
+        {
+          if (!cache_dl3)
+            fatal("I-cache l2 cannot access D-cache l3 as it's undefined");
+          cache_il2 = cache_dl3;
+        }
       else
 	{
 	  if (sscanf(cache_il2_opt, "%[^:]:%d:%d:%d:%c",
@@ -1106,6 +1260,27 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
 	  cache_il2 = cache_create(name, nsets, bsize, /* balloc */FALSE,
 				   /* usize */0, assoc, cache_char2policy(c),
 				   il2_access_fn, /* hit lat */cache_il2_lat);
+
+          /* is the level 3 I-cache defined? */
+          if (!mystricmp(cache_il3_opt, "none"))
+            cache_il3 = NULL;
+          else if (!mystricmp(cache_il3_opt, "dl3"))
+            {
+              if (!cache_dl3)
+                 fatal("I-cache l3 cannot access D-cache l3 as it's undefined");
+              cache_il3 = cache_dl3;
+            }
+          else
+            {
+              if (sscanf(cache_il3_opt, "%[^:]:%d:%d:%d:%c",
+                         name, &nsets, &bsize, &assoc, &c) != 5)
+                fatal("bad l3 I-cache parms: "
+                      "<name>:<nsets>:<bsize>:<assoc>:<repl>");
+              cache_il3 = cache_create(name, nsets, bsize, /* balloc */FALSE,
+                                       /* usize */0, assoc, cache_char2policy(c),
+                                       il3_access_fn, /* hit latency */1);
+            }
+
 	}
     }
 
@@ -1313,15 +1488,17 @@ sim_reg_stats(struct stat_sdb_t *sdb)   /* stats database */
 
   /* register cache stats */
   if (cache_il1
-      && (cache_il1 != cache_dl1 && cache_il1 != cache_dl2))
+      && (cache_il1 != cache_dl1 && cache_il1 != cache_dl2 && cache_il1 != cache_dl3))
     cache_reg_stats(cache_il1, sdb);
   if (cache_il2
-      && (cache_il2 != cache_dl1 && cache_il2 != cache_dl2))
+      && (cache_il2 != cache_dl1 && cache_il2 != cache_dl2 && cache_il2 != cache_dl3))
     cache_reg_stats(cache_il2, sdb);
   if (cache_dl1)
     cache_reg_stats(cache_dl1, sdb);
   if (cache_dl2)
     cache_reg_stats(cache_dl2, sdb);
+  if (cache_dl3)
+    cache_reg_stats(cache_dl3, sdb);
   if (itlb)
     cache_reg_stats(itlb, sdb);
   if (dtlb)
