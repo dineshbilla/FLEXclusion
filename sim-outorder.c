@@ -176,7 +176,7 @@ static int cache_dl2_lat;
 static char *cache_dl3_opt;
 
 /* l3 data cache hit latency (in cycles) */
-//static int cache_dl3_lat;
+static int cache_dl3_lat;
 
 /* l1 instruction cache config, i.e., {<config>|dl1|dl2|none} */
 static char *cache_il1_opt;
@@ -460,13 +460,13 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
       /* access next level of data cache hierarchy */
       lat = cache_access(cache_dl2, cmd, baddr, NULL, bsize,
 			 /* now */now, /* pudata */NULL, /* repl addr */NULL);
-      if (cmd == Read)
+//      if (cmd == Read)
 	return lat;
-      else
-	{
-	  /* FIXME: unlimited write buffers */
-	  return 0;
-	}
+//      else
+//	{
+//	  /* FIXME: unlimited write buffers */
+//	  return 0;
+//	}
     }
   else
     {
@@ -494,13 +494,13 @@ dl2_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
       /* access next level of data cache hierarchy */
       lat = cache_access(cache_dl3, cmd, baddr, NULL, bsize,
                          /* now */now, /* pudata */NULL, /* repl addr */NULL);
-      if (cmd == Read)
+//      if (cmd == Read)
         return lat;
-      else
-        {
-          /* FIXME: unlimited write buffers */
-          return 0;
-        }
+//      else
+//        {
+//          /* FIXME: unlimited write buffers */
+//          return 0;
+//        }
   }
   else{
   /* this is a miss to the lowest level, so access main memory */
@@ -865,6 +865,11 @@ sim_reg_options(struct opt_odb_t *odb)
 	      &cache_dl2_lat, /* default */6,
 	      /* print */TRUE, /* format */NULL);
 
+  opt_reg_int(odb, "-cache:dl3lat",
+              "l2 data cache hit latency (in cycles)",
+              &cache_dl3_lat, /* default */10,
+              /* print */TRUE, /* format */NULL);
+
   opt_reg_string(odb, "-cache:il1",
 		 "l1 inst cache config, i.e., {<config>|dl1|dl2|none}",
 		 &cache_il1_opt, "il1:512:32:1:l",
@@ -1158,7 +1163,7 @@ sim_check_options(struct opt_odb_t *odb,        /* options database */
                       "<name>:<nsets>:<bsize>:<assoc>:<repl>");
               cache_dl3 = cache_create(name, nsets, bsize, /* balloc */FALSE,
                                        /* usize */0, assoc, cache_char2policy(c),
-                                       dl3_access_fn, /* hit latency */1);
+                                       dl3_access_fn, /* hit latency */cache_dl3_lat);
             }
         }
     }

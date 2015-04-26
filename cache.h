@@ -105,6 +105,21 @@ enum cache_policy {
   FIFO		/* replace the oldest block in the set */
 };
 
+/* mode of operation */
+enum cache_mode {
+  inclusive, // default
+  exclusive,
+  noninclusive,
+  texclusive
+};
+
+enum cache_type {
+  L1,
+  L2,
+  L3
+};
+
+
 /* block status values */
 #define CACHE_BLK_VALID		0x00000001	/* block in valid, in use */
 #define CACHE_BLK_DIRTY		0x00000002	/* dirty block */
@@ -157,6 +172,7 @@ struct cache_t
   int assoc;			/* cache associativity */
   enum cache_policy policy;	/* cache replacement policy */
   unsigned int hit_latency;	/* cache hit latency */
+  enum cache_type ctype;
 
   /* miss/replacement handler, read/write BSIZE bytes starting at BADDR
      from/into cache block BLK, returns the latency of the operation
