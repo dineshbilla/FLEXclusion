@@ -110,7 +110,8 @@ enum cache_mode {
   inclusive, // default
   exclusive,
   noninclusive,
-  texclusive
+  texclusive,
+  tobedecided
 };
 
 enum cache_type {
@@ -158,6 +159,7 @@ struct cache_set_t
   struct cache_blk_t *blks;	/* cache blocks, allocated sequentially, so
 				   this pointer can also be used for random
 				   access to cache blocks */
+  enum cache_mode mode;
 };
 
 /* cache definition */
@@ -227,8 +229,6 @@ struct cache_t
      defined in this structure! */
   struct cache_set_t sets[1];	/* each entry is a set */
 };
-
-void set_use_colassoc(int status);
 
 /* create and initialize a general cache structure */
 struct cache_t *			/* pointer to cache created */

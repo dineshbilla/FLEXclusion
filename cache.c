@@ -144,8 +144,10 @@
 /* bound sqword_t/dfloat_t to positive int */
 #define BOUND_POS(N)		((int)(MIN(MAX(0, (N)), 2147483647)))
 
-
-int use_colassoc;
+/* Ton-chip= #missL2 (❺,❻) + #missL2 (❸,❹) for exclusive */
+int ex_miss_l2 = 0;
+/* Ton-chip= #missL2 (❺,❻) + #missL2 × %dirtyL2 (❹) for inclusive*/
+int ninc_miss_l2 = 0;
 enum cache_mode cmode = exclusive;
 int is_l3_miss = FALSE;
 
@@ -266,10 +268,6 @@ update_way_list(struct cache_set_t *set,	/* set contained way chain */
     panic("bogus WHERE designator");
 }
 
-void set_use_colassoc(int status){
-    use_colassoc = status;
-}
-
 /* create and initialize a general cache structure */
 struct cache_t *			/* pointer to cache created */
 cache_create(char *name,		/* name of the cache */
@@ -289,6 +287,7 @@ cache_create(char *name,		/* name of the cache */
   struct cache_t *cp;
   struct cache_blk_t *blk;
   int i, j, bindex;
+  int nc=0,ex=0;
 
   /* check all cache parameters */
   if (nsets <= 0)
@@ -421,6 +420,22 @@ cache_create(char *name,		/* name of the cache */
 	    cp->sets[i].way_tail = blk;
 	}
     }
+
+  for(i=0;i<cp->nsets;i++){
+      if(cp->ctype == L3){
+          if(nc <16 && i%4 == 0){
+              cp->sets[i].mode = noninclusive;
+              nc++;
+            }
+          else if(ex <16 && i%4 == 2){
+              cp->sets[i].mode = exclusive;
+              ex++;
+            }
+          else cp->sets[i].mode = tobedecided;
+        }
+      else cp->sets[i].mode = tobedecided;
+    }
+
   return cp;
 }
 
@@ -563,6 +578,17 @@ cache_access(struct cache_t *cp,	/* cache to access */
 
   /* permissions are checked on cache misses */
 
+  /* Ton-chip= #missL2 (❺,❻) + #missL2 (❸,❹) for exclusive */
+  /* Second Term in eq */
+  if(cp->sets[set].mode == exclusive){
+      ex_miss_l2++;
+    }
+  /* Ton-chip= #missL2 (❺,❻) + #missL2 × %dirtyL2 (❹) for inclusive*/
+  if(cp->sets[set].mode == noninclusive && cmd == Write){
+      ninc_miss_l2++;
+    }
+
+
   /* check for a fast hit: access to same block */
   if (CACHE_TAGSET(cp, addr) == cp->last_tagset)
     {
@@ -681,10 +707,13 @@ cache_access(struct cache_t *cp,	/* cache to access */
 
       /* track bus resource usage */
       cp->bus_free = MAX(cp->bus_free, (now + lat)) + 1;
-
+      /* However, in exclusive caches, the victim line is always installed into the L3
+      cache regardless of its dirty status (❸,❹). Note that clean
+      victims (❸) in inclusive/non-inclusive caches are always
+      dropped silently without the insertion into L3 caches*/
       if ((repl->status & CACHE_BLK_DIRTY) ||
-//          ((cmode == exclusive || cmode == noninclusive) && cp->ctype == L2) ||
-          (cmode == texclusive)) // replacement block will be written into L1->L2 or L2->L3 or L3->mem
+          (cmode == exclusive && cp->ctype == L2))
+          //(cmode == texclusive)) // replacement block will be written into L1->L2 or L2->L3 or L3->mem
         {
           /* write back the cache block */
           cp->writebacks++;
