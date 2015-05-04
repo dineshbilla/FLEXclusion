@@ -151,7 +151,7 @@ int ninc_miss_l2 = 0;
 int ex_l3_miss = 0,ninc_l3_miss = 0; // Track the missrate in L3 for the dedicated sets
 int l3_accesses = 0;
 
-enum cache_mode cmode = inclusive;
+enum cache_mode cmode = exclusive;
 int is_l3_miss = FALSE;
 
 /* unlink BLK from the hash table bucket chain in SET */
@@ -361,7 +361,8 @@ cache_create(char *name,		/* name of the cache */
   cp->writebacks = 0;
   cp->invalidations = 0;
   cp->ipki_sum = 0;
-  cp->perf_sum =0;
+  cp->inc_l3_traffic = 1;
+  cp->ex_l3_traffic = 1;
 
   /* blow away the last block accessed */
   cp->last_tagset = 0;
@@ -521,9 +522,26 @@ cache_reg_stats(struct cache_t *cp,	/* cache instance */
   stat_reg_counter(sdb, buf, "total number of ipki",
 		  &cp->ipki_sum, 0, NULL);
 
-  sprintf(buf, "%s.perf_final", name);
-  stat_reg_counter(sdb, buf, "total number of perf rel non incl",
-    				&cp->perf_sum, 0, NULL);
+//  sprintf(buf, "%s.perf_final", name);
+//  stat_reg_counter(sdb, buf, "total number of perf rel non incl",
+//    				&cp->perf_sum, 0, NULL);
+
+  sprintf(buf, "%s.ex_l3_traffic", name);
+  stat_reg_counter(sdb, buf, "exclusive L3 insertion traffic",
+                  &cp->ex_l3_traffic, 0, NULL);
+
+  sprintf(buf, "%s.inc_l3_traffic", name);
+  stat_reg_counter(sdb, buf, "inclusive L3 insertion traffic",
+                                &cp->inc_l3_traffic, 0, NULL);
+
+
+  sprintf(buf, "%s.IPKI", name);
+  sprintf(buf1, "%s.ipki_final / sim_num_insn", name);
+  stat_reg_formula(sdb, buf, "IPKI (i.e., L3 insertions per kilo)", buf1, NULL);
+
+  sprintf(buf, "%s.Perf", name);
+  sprintf(buf1, "%s.ex_l3_traffic / %s.inc_l3_traffic", name,name);
+  stat_reg_formula(sdb, buf, "RelPerf (i.e., Exclusive Misses / Inc Misses)", buf1, NULL);
 
   //TODO:
   sprintf(buf, "%s.miss_rate", name);
@@ -586,8 +604,8 @@ cache_access(struct cache_t *cp,	/* cache to access */
   struct cache_blk_t *blk, *repl;
   int lat = 0;
   //struct cache_blk_t tmp_repl;
-  double relative_perf;
-  double ipki;
+//  double relative_perf;
+//  double ipki;
   int do_replacement = TRUE;
 
 #ifdef PRINT_DEBUG
@@ -638,17 +656,12 @@ cache_access(struct cache_t *cp,	/* cache to access */
 //        }
 //    }
 
-
-
-	  counter_t relative_perf = (ninc_l3_miss*1000)/(ex_l3_miss);
-	  cp->perf_sum = (relative_perf);
-
-	  counter_t ipki;
-	  ipki = (ex_miss_l2-ninc_miss_l2);
-
-	  cp->ipki_sum = (ipki);
-
-	//printf("# IPKI = %lld\tPERF w non-inclu = %lld\n",ipki,relative_perf);
+  if(sim_num_insn > 10000000){
+      cp->ex_l3_traffic = ex_l3_miss;
+      cp->inc_l3_traffic = ninc_l3_miss;
+      cp->ipki_sum = (ex_miss_l2-ninc_miss_l2)*1000;
+    }
+  //printf("# IPKI = %lld\tPERF w non-inclu = %lld\n",ipki,relative_perf);
 
   /* check for a fast hit: access to same block */
   if (CACHE_TAGSET(cp, addr) == cp->last_tagset)
@@ -848,8 +861,8 @@ cache_access(struct cache_t *cp,	/* cache to access */
 #ifdef PRINT_DEBUG
           if(cp->ctype == L2 || cp->ctype == L3) printf("invalidate..");
 #endif
-          if (cp->hsize)
-            unlink_htab_ent(cp, &cp->sets[set], blk);
+//          if (cp->hsize)
+//            unlink_htab_ent(cp, &cp->sets[set], blk);
           blk->status &= ~CACHE_BLK_VALID;
 #ifdef PRINT_DEBUG
           if(cp->ctype == L2 || cp->ctype == L3) printf("done..");
@@ -907,8 +920,8 @@ cache_access(struct cache_t *cp,	/* cache to access */
 
       if(cmd == Read){
           /* remove this block from the hash bucket chain, if hash exists */
-          if (cp->hsize)
-            unlink_htab_ent(cp, &cp->sets[set], blk);
+//          if (cp->hsize)
+//            unlink_htab_ent(cp, &cp->sets[set], blk);
           blk->status &= ~CACHE_BLK_VALID;
           return (int) MAX(cp->hit_latency, (blk->ready - now));
         }

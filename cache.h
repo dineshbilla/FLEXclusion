@@ -219,7 +219,9 @@ struct cache_t
   counter_t invalidations;	/* total number of external invalidations */
 
   counter_t ipki_sum;
-  counter_t perf_sum;
+  counter_t inc_l3_traffic;
+  counter_t ex_l3_traffic;
+
 
   /* last block to hit, used to optimize cache hit processing */
   md_addr_t last_tagset;	/* tag of last line accessed */
