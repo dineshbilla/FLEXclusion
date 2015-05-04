@@ -459,14 +459,14 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
     {
       /* access next level of data cache hierarchy */
       lat = cache_access(cache_dl2, cmd, baddr, NULL, bsize,
-			 /* now */now, /* pudata */NULL, /* repl addr */NULL);
-//      if (cmd == Read)
+                         /* now */now, /* pudata */NULL, /* repl addr */NULL,cache_dl3);
+      if (cmd == Read)
 	return lat;
-//      else
-//	{
-//	  /* FIXME: unlimited write buffers */
-//	  return 0;
-//	}
+      else
+        {
+          /* FIXME: unlimited write buffers */
+          return 0;
+        }
     }
   else
     {
@@ -474,10 +474,10 @@ dl1_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
       if (cmd == Read)
 	return mem_access_latency(bsize);
       else
-	{
-	  /* FIXME: unlimited write buffers */
-	  return 0;
-	}
+        {
+          /* FIXME: unlimited write buffers */
+          return 0;
+        }
     }
 }
 
@@ -493,14 +493,14 @@ dl2_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
   if(cache_dl3){
       /* access next level of data cache hierarchy */
       lat = cache_access(cache_dl3, cmd, baddr, NULL, bsize,
-                         /* now */now, /* pudata */NULL, /* repl addr */NULL);
-//      if (cmd == Read)
+                         /* now */now, /* pudata */NULL, /* repl addr */NULL,NULL);
+      if (cmd == Read)
         return lat;
-//      else
-//        {
-//          /* FIXME: unlimited write buffers */
-//          return 0;
-//        }
+      else
+        {
+          /* FIXME: unlimited write buffers */
+          return 0;
+        }
   }
   else{
   /* this is a miss to the lowest level, so access main memory */
@@ -547,7 +547,7 @@ if (cache_il2)
     {
       /* access next level of inst cache hierarchy */
       lat = cache_access(cache_il2, cmd, baddr, NULL, bsize,
-			 /* now */now, /* pudata */NULL, /* repl addr */NULL);
+                         /* now */now, /* pudata */NULL, /* repl addr */NULL,cache_il3);
       if (cmd == Read)
 	return lat;
       else
@@ -576,7 +576,7 @@ il2_access_fn(enum mem_cmd cmd,		/* access cmd, Read or Write */
     {
       /* access next level of inst cache hierarchy */
       lat = cache_access(cache_il3, cmd, baddr, NULL, bsize,
-                         /* now */now, /* pudata */NULL, /* repl addr */NULL);
+                         /* now */now, /* pudata */NULL, /* repl addr */NULL,NULL);
       if (cmd == Read)
         return lat;
       else
@@ -2376,7 +2376,7 @@ ruu_commit(void)
 		      /* commit store value to D-cache */
 		      lat =
 			cache_access(cache_dl1, Write, (LSQ[LSQ_head].addr&~3),
-				     NULL, 4, sim_cycle, NULL, NULL);
+				     NULL, 4, sim_cycle, NULL, NULL,cache_dl2);
 		      if (lat > cache_dl1_lat)
 			events |= PEV_CACHEMISS;
 		    }
@@ -2387,7 +2387,7 @@ ruu_commit(void)
 		      /* access the D-TLB */
 		      lat =
 			cache_access(dtlb, Read, (LSQ[LSQ_head].addr & ~3),
-				     NULL, 4, sim_cycle, NULL, NULL);
+				     NULL, 4, sim_cycle, NULL, NULL,NULL);
 		      if (lat > 1)
 			events |= PEV_TLBMISS;
 		    }
@@ -2922,7 +2922,7 @@ ruu_issue(void)
 				  load_lat =
 				    cache_access(cache_dl1, Read,
 						 (rs->addr & ~3), NULL, 4,
-						 sim_cycle, NULL, NULL);
+						 sim_cycle, NULL, NULL,NULL);
 				  if (load_lat > cache_dl1_lat)
 				    events |= PEV_CACHEMISS;
 				}
@@ -2940,7 +2940,7 @@ ruu_issue(void)
 				 initiate speculative TLB misses */
 			      tlb_lat =
 				cache_access(dtlb, Read, (rs->addr & ~3),
-					     NULL, 4, sim_cycle, NULL, NULL);
+					     NULL, 4, sim_cycle, NULL, NULL,NULL);
 			      if (tlb_lat > 1)
 				events |= PEV_TLBMISS;
 
@@ -4422,7 +4422,7 @@ ruu_fetch(void)
 	      lat =
 		cache_access(cache_il1, Read, IACOMPRESS(fetch_regs_PC),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
-			     NULL, NULL);
+			     NULL, NULL,NULL);
 	      if (lat > cache_il1_lat)
 		last_inst_missed = TRUE;
 	    }
@@ -4434,7 +4434,7 @@ ruu_fetch(void)
 	      tlb_lat =
 		cache_access(itlb, Read, IACOMPRESS(fetch_regs_PC),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
-			     NULL, NULL);
+			     NULL, NULL,NULL);
 	      if (tlb_lat > 1)
 		last_inst_tmissed = TRUE;
 

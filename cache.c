@@ -1,4 +1,4 @@
-/* cache.c - cache module routines */
+﻿/* cache.c - cache module routines */
 
 /* SimpleScalar(TM) Tool Suite
  * Copyright (C) 1994-2003 by Todd M. Austin, Ph.D. and SimpleScalar, LLC.
@@ -148,7 +148,10 @@
 int ex_miss_l2 = 0;
 /* Ton-chip= #missL2 (❺,❻) + #missL2 × %dirtyL2 (❹) for inclusive*/
 int ninc_miss_l2 = 0;
-enum cache_mode cmode = exclusive;
+int ex_l3_miss = 0,ninc_l3_miss = 0; // Track the missrate in L3 for the dedicated sets
+int l3_accesses = 0;
+
+enum cache_mode cmode = inclusive;
 int is_l3_miss = FALSE;
 
 /* unlink BLK from the hash table bucket chain in SET */
@@ -357,6 +360,8 @@ cache_create(char *name,		/* name of the cache */
   cp->replacements = 0;
   cp->writebacks = 0;
   cp->invalidations = 0;
+  cp->ipki_sum = 0;
+  cp->perf_sum =0;
 
   /* blow away the last block accessed */
   cp->last_tagset = 0;
@@ -424,7 +429,7 @@ cache_create(char *name,		/* name of the cache */
   for(i=0;i<cp->nsets;i++){
       if(cp->ctype == L3){
           if(nc <16 && i%4 == 0){
-              cp->sets[i].mode = noninclusive;
+              cp->sets[i].mode = inclusive;
               nc++;
             }
           else if(ex <16 && i%4 == 2){
@@ -500,6 +505,28 @@ cache_reg_stats(struct cache_t *cp,	/* cache instance */
   sprintf(buf, "%s.miss_rate", name);
   sprintf(buf1, "%s.misses / %s.accesses", name, name);
   stat_reg_formula(sdb, buf, "miss rate (i.e., misses/ref)", buf1, NULL);
+
+  sprintf(buf, "%s.MPKI", name);
+  sprintf(buf1, "%s.misses * 1000/ sim_num_insn", name);
+  stat_reg_formula(sdb, buf, "miss MPKI (i.e., misses/total)", buf1, NULL);
+
+  /*sprintf(buf, "%s.IPKI_avg", name);
+  stat_reg_counter(sdb, buf, "total ipki_sum",
+		  &cp->ipki_sum, 0, NULL);
+  sprintf(buf, "%s.perf avg", name);
+    stat_reg_counter(sdb, buf, "total ipki_sum",
+    		&cp->perf_sum, 0, NULL)*/
+
+  sprintf(buf, "%s.ipki_final", name);
+  stat_reg_counter(sdb, buf, "total number of ipki",
+		  &cp->ipki_sum, 0, NULL);
+
+  sprintf(buf, "%s.perf_final", name);
+  stat_reg_counter(sdb, buf, "total number of perf rel non incl",
+    				&cp->perf_sum, 0, NULL);
+
+  //TODO:
+  sprintf(buf, "%s.miss_rate", name);
   sprintf(buf, "%s.repl_rate", name);
   sprintf(buf1, "%s.replacements / %s.accesses", name, name);
   stat_reg_formula(sdb, buf, "replacement rate (i.e., repls/ref)", buf1, NULL);
@@ -549,15 +576,19 @@ cache_access(struct cache_t *cp,	/* cache to access */
 	     int nbytes,		/* number of bytes to access */
 	     tick_t now,		/* time of access */
 	     byte_t **udata,		/* for return of user data ptr */
-	     md_addr_t *repl_addr)	/* for address of replaced block */
+	     md_addr_t *repl_addr,
+	     struct cache_t *upperlevel)	/* for address of replaced block */
 {
   byte_t *p = vp;
   md_addr_t tag = CACHE_TAG(cp, addr);
   md_addr_t set = CACHE_SET(cp, addr);
   md_addr_t bofs = CACHE_BLK(cp, addr);
-  struct cache_blk_t *blk, *repl,*alt_blk;
-  int lat = 0,tlat=0;
+  struct cache_blk_t *blk, *repl;
+  int lat = 0;
   //struct cache_blk_t tmp_repl;
+  double relative_perf;
+  double ipki;
+  int do_replacement = TRUE;
 
 #ifdef PRINT_DEBUG
   printf("L%d...CMD(%d)...",(cp->ctype+1),cmd);
@@ -584,10 +615,40 @@ cache_access(struct cache_t *cp,	/* cache to access */
       ex_miss_l2++;
     }
   /* Ton-chip= #missL2 (❺,❻) + #missL2 × %dirtyL2 (❹) for inclusive*/
-  if(cp->sets[set].mode == noninclusive && cmd == Write){
+  if(cp->sets[set].mode == inclusive && cmd == Write){
       ninc_miss_l2++;
     }
 
+//  if(cp->ctype == L3){
+//      l3_accesses++;
+//      if(l3_accesses % 10000 == 0){
+//          relative_perf = (double)(ninc_l3_miss/(double)ex_l3_miss);
+//          ipki = (double)(1000*(ex_miss_l2-ninc_miss_l2))/sim_num_insn;
+//          printf("ex_miss_l2 %d ninc_miss_l2 %d ex_l3_miss %d ninc_l3_miss %d \t IPKI %f Perf Relative %f\n",
+//                 ex_miss_l2,ninc_miss_l2,ex_l3_miss,ninc_l3_miss,
+//                 ipki,relative_perf);
+//          if(ipki )
+//          if(relative_perf > 1.5){
+//              cmode = exclusive;
+//            }
+//          else{
+//              cmode = inclusive;
+//            }
+
+//        }
+//    }
+
+
+
+	  counter_t relative_perf = (ninc_l3_miss*1000)/(ex_l3_miss);
+	  cp->perf_sum = (relative_perf);
+
+	  counter_t ipki;
+	  ipki = (ex_miss_l2-ninc_miss_l2);
+
+	  cp->ipki_sum = (ipki);
+
+	//printf("# IPKI = %lld\tPERF w non-inclu = %lld\n",ipki,relative_perf);
 
   /* check for a fast hit: access to same block */
   if (CACHE_TAGSET(cp, addr) == cp->last_tagset)
@@ -630,18 +691,27 @@ cache_access(struct cache_t *cp,	/* cache to access */
 #ifdef PRINT_DEBUG
   printf("miss...");
 #endif
-  if(is_l3_miss == TRUE && cp->ctype == L3){
-      is_l3_miss = 2;
-      return cp->hit_latency;
-    }
+
   cp->misses++;
+
+  if(cp->sets[set].mode == exclusive){
+      ex_l3_miss++;
+    }
+  else if (cp->sets[set].mode == inclusive){
+      ninc_l3_miss++;
+    }
+
 
   // exclusive: miss in L3 -> dont bring into L3, L2 will have copy
   //            hit in L3 -> exict blk from L3 and insert into L2
   // non-inclusive -> miss in L2 and L3: bring into L3 not L2
   //                  miss in L2 and hit in L3: copy from L3 to L2
 
-  if(cp->ctype == L3 && cmode == exclusive && cmd == Read) //dont bring into L3
+
+  if(cp->sets[set].mode == tobedecided && cp->ctype == L3 && cmode == exclusive && cmd == Read) //dont bring into L3
+      return cp->blk_access_fn(Read, CACHE_BADDR(cp, addr), cp->bsize,NULL,0); // mem_access_latency(bsize)
+
+  if(cp->sets[set].mode == exclusive && cmd == Read) //dont bring into L3
       return cp->blk_access_fn(Read, CACHE_BADDR(cp, addr), cp->bsize,NULL,0); // mem_access_latency(bsize)
 
   if((cp->ctype == L2 || cp->ctype == L3) && cmode == texclusive &&  cmd == Read){
@@ -653,79 +723,75 @@ cache_access(struct cache_t *cp,	/* cache to access */
     }
 
   // miss in L2 and L3: bring into L3 not L2 - cache pollution
-  if(cp->ctype == L2 && cmode == noninclusive && cmd == Read){
+  if(/*cp->sets[set].mode == tobedecided && */cp->ctype == L2 && cmode == noninclusive && cmd == Read){
       /* Check if Block is present in L3 */
-      is_l3_miss = TRUE;
-      tlat += cp->blk_access_fn(Read, CACHE_BADDR(cp, addr), cp->bsize,
-                               NULL, 0);
-      if(is_l3_miss == 2){
-          is_l3_miss = FALSE;
-          return tlat;
-        }
-      is_l3_miss = FALSE;
+      if(cache_probe(upperlevel,CACHE_BADDR(cp, addr)) == FALSE)
+          do_replacement = FALSE;
     }
 
-  /* select the appropriate block to replace, and re-link this entry to
+  if(do_replacement == TRUE){
+      /* select the appropriate block to replace, and re-link this entry to
      the appropriate place in the way list */
-  switch (cp->policy) {
-  case LRU:
-  case FIFO:
-    repl = cp->sets[set].way_tail;
-    update_way_list(&cp->sets[set], repl, Head);
-    break;
-  case Random:
-    {
-      int bindex = myrand() & (cp->assoc - 1);
-      repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);
-    }
-    break;
-  default:
-    panic("bogus replacement policy");
-  }
+      switch (cp->policy) {
+        case LRU:
+        case FIFO:
+          repl = cp->sets[set].way_tail;
+          update_way_list(&cp->sets[set], repl, Head);
+          break;
+        case Random:
+          {
+            int bindex = myrand() & (cp->assoc - 1);
+            repl = CACHE_BINDEX(cp, cp->sets[set].blks, bindex);
+          }
+          break;
+        default:
+          panic("bogus replacement policy");
+        }
 
-  /* remove this block from the hash bucket chain, if hash exists */
-  if (cp->hsize)
-    unlink_htab_ent(cp, &cp->sets[set], repl);
+      /* remove this block from the hash bucket chain, if hash exists */
+      if (cp->hsize)
+        unlink_htab_ent(cp, &cp->sets[set], repl);
 
-  /* blow away the last block to hit */
-  cp->last_tagset = 0;
-  cp->last_blk = NULL;
+      /* blow away the last block to hit */
+      cp->last_tagset = 0;
+      cp->last_blk = NULL;
 
-  /* write back replaced block data */
-  if (repl->status & CACHE_BLK_VALID)
-    {
-      cp->replacements++;
+      /* write back replaced block data */
+      if (repl->status & CACHE_BLK_VALID)
+        {
+          cp->replacements++;
 
-      if (repl_addr)
-        *repl_addr = CACHE_MK_BADDR(cp, repl->tag, set);
+          if (repl_addr)
+            *repl_addr = CACHE_MK_BADDR(cp, repl->tag, set);
 
-      /* don't replace the block until outstanding misses are satisfied */
-      lat += BOUND_POS(repl->ready - now);
+          /* don't replace the block until outstanding misses are satisfied */
+          lat += BOUND_POS(repl->ready - now);
 
-      /* stall until the bus to next level of memory is available */
-      lat += BOUND_POS(cp->bus_free - (now + lat));
+          /* stall until the bus to next level of memory is available */
+          lat += BOUND_POS(cp->bus_free - (now + lat));
 
-      /* track bus resource usage */
-      cp->bus_free = MAX(cp->bus_free, (now + lat)) + 1;
-      /* However, in exclusive caches, the victim line is always installed into the L3
+          /* track bus resource usage */
+          cp->bus_free = MAX(cp->bus_free, (now + lat)) + 1;
+          /* However, in exclusive caches, the victim line is always installed into the L3
       cache regardless of its dirty status (❸,❹). Note that clean
       victims (❸) in inclusive/non-inclusive caches are always
       dropped silently without the insertion into L3 caches*/
-      if ((repl->status & CACHE_BLK_DIRTY) ||
-          (cmode == exclusive && cp->ctype == L2))
-          //(cmode == texclusive)) // replacement block will be written into L1->L2 or L2->L3 or L3->mem
-        {
-          /* write back the cache block */
-          cp->writebacks++;
-          lat += cp->blk_access_fn(Write,
-                                   CACHE_MK_BADDR(cp, repl->tag, set),
-                                   cp->bsize, repl, now+lat);
+          if ((repl->status & CACHE_BLK_DIRTY) ||
+              (cmode == exclusive && cp->ctype == L2))
+            //(cmode == texclusive)) // replacement block will be written into L1->L2 or L2->L3 or L3->mem
+            {
+              /* write back the cache block */
+              cp->writebacks++;
+              lat += cp->blk_access_fn(Write,
+                                       CACHE_MK_BADDR(cp, repl->tag, set),
+                                       cp->bsize, repl, now+lat);
+            }
         }
-    }
 
-//  printf(".BTU.");
-  repl->tag = tag;
-  repl->status = CACHE_BLK_VALID;	/* dirty bit set on update */
+      //  printf(".BTU.");
+      repl->tag = tag;
+      repl->status = CACHE_BLK_VALID;	/* dirty bit set on update */
+    }
 //  printf(".TU.");
   /* read data block */
   lat += cp->blk_access_fn(Read, CACHE_BADDR(cp, addr), cp->bsize,
@@ -766,7 +832,6 @@ cache_access(struct cache_t *cp,	/* cache to access */
   printf("hit...");
 #endif
   /* **HIT** */
-  if(is_l3_miss == TRUE) return cp->hit_latency;
 
   cp->hits++;
 
@@ -774,8 +839,9 @@ cache_access(struct cache_t *cp,	/* cache to access */
   //            hit in L3 -> exict blk from L3 and insert into L2
   // non-inclusive -> miss in L2 and L3: bring into L3 not L2
   //                  miss in L2 and hit in L3: copy from L3 and bring into L2
-  if((cmode == texclusive && (cp->ctype == L2 || cp->ctype == L3)) ||
-     ((cmode == exclusive /*|| cmode == noninclusive*/) && cp->ctype == L3)){// exclusive will invalidate the block in L3 as L2 will have a copy
+  if(/*(cmode == texclusive && (cp->ctype == L2 || cp->ctype == L3)) ||*/
+     (cp->sets[set].mode == tobedecided && cmode == exclusive && cp->ctype == L3) || // exclusive will invalidate the block in L3 as L2 will have a copy
+     (cp->sets[set].mode == exclusive && cp->ctype == L3)){
 
       if(cmd == Read){
           /* remove this block from the hash bucket chain, if hash exists */
@@ -801,8 +867,6 @@ cache_access(struct cache_t *cp,	/* cache to access */
   /* update dirty status */
   if (cmd == Write)
     blk->status |= CACHE_BLK_DIRTY;
-
-
 
   /* if LRU replacement and this is not the first element of list, reorder */
   if (blk->way_prev && cp->policy == LRU)
@@ -834,12 +898,12 @@ cache_access(struct cache_t *cp,	/* cache to access */
   printf("fast hit....");
 #endif
   /* **FAST HIT** */
-  if(is_l3_miss == TRUE) return cp->hit_latency;
 
   cp->hits++;
 
-  if((cmode == texclusive && (cp->ctype == L2 || cp->ctype == L3)) ||
-     ((cmode == exclusive /*|| cmode == noninclusive*/) && cp->ctype == L3)){// exclusive will invalidate the block in L3 as L2 will have a copy
+  if(/*(cmode == texclusive && (cp->ctype == L2 || cp->ctype == L3)) ||*/
+     (cp->sets[set].mode == tobedecided && cmode == exclusive && cp->ctype == L3) || // exclusive will invalidate the block in L3 as L2 will have a copy
+     (cp->sets[set].mode == exclusive && cp->ctype == L3)){
 
       if(cmd == Read){
           /* remove this block from the hash bucket chain, if hash exists */

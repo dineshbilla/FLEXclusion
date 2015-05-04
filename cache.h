@@ -59,7 +59,7 @@
 #include "machine.h"
 #include "memory.h"
 #include "stats.h"
-
+#include "sim.h"
 /*
  * This module contains code to implement various cache-like structures.  The
  * user instantiates caches using cache_new().  When instantiated, the user
@@ -218,6 +218,9 @@ struct cache_t
   counter_t writebacks;		/* total number of writebacks at misses */
   counter_t invalidations;	/* total number of external invalidations */
 
+  counter_t ipki_sum;
+  counter_t perf_sum;
+
   /* last block to hit, used to optimize cache hit processing */
   md_addr_t last_tagset;	/* tag of last line accessed */
   struct cache_blk_t *last_blk;	/* cache block last accessed */
@@ -228,6 +231,7 @@ struct cache_t
   /* NOTE: this is a variable-size tail array, this must be the LAST field
      defined in this structure! */
   struct cache_set_t sets[1];	/* each entry is a set */
+  struct cache_t *upperlevel;
 };
 
 /* create and initialize a general cache structure */
@@ -281,7 +285,7 @@ cache_access(struct cache_t *cp,	/* cache to access */
 	     int nbytes,		/* number of bytes to access */
 	     tick_t now,		/* time of access */
 	     byte_t **udata,		/* for return of user data ptr */
-	     md_addr_t *repl_addr);	/* for address of replaced block */
+	     md_addr_t *repl_addr, struct cache_t *upperlevel);	/* for address of replaced block */
 
 /* cache access functions, these are safe, they check alignment and
    permissions */
