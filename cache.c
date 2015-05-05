@@ -433,7 +433,7 @@ cache_create(char *name,		/* name of the cache */
     }
 
   for(i=0;i<cp->nsets;i++){
-      if(cp->ctype == L3){
+/*      if(cp->ctype == L3){
           if(nc <16 && i%4 == 0){
               cp->sets[i].mode = exclusive;
               nc++;
@@ -444,7 +444,7 @@ cache_create(char *name,		/* name of the cache */
             }
           else cp->sets[i].mode = tobedecided;
         }
-      else cp->sets[i].mode = tobedecided;
+      else */cp->sets[i].mode = tobedecided;
     }
 
   if(cp->ctype == L2) myl2cp = cp;
@@ -541,6 +541,12 @@ cache_reg_stats(struct cache_t *cp,	/* cache instance */
   stat_reg_counter(sdb, buf, "# Drity L2 blocks",
                   &cp->dirty, 0, NULL);
 
+  sprintf(buf, "%s.ex_l3_miss", name);
+  stat_reg_counter(sdb, buf, "# ex_l3_miss",
+                  &cp->ex_l3_miss, 0, NULL);
+  sprintf(buf, "%s.ninc_l3_miss", name);
+  stat_reg_counter(sdb, buf, "# ninc_l3_miss",
+                  &cp->ninc_l3_miss, 0, NULL);
 
   sprintf(buf, "%s.IPKI", name);
   sprintf(buf1, "%s.misses*1000*(%s.valid-%s.dirty) /(%s.valid*sim_num_insn)", name, name, name, name);
@@ -600,7 +606,7 @@ void swap(struct cache_t *cp,md_addr_t set,md_addr_t bit_flip){
   cp->data[bit_flip] = temp;
 }
 
-void set_mode(void){
+void set_mode(int flag){
   int i;
   struct cache_blk_t *blk;
   double valid = 1,dirty = 1, mpki, ipki, xipki;
@@ -626,24 +632,25 @@ void set_mode(void){
 //  printf("valid: %f, dirty: %f mpki %f ipki %f",valid,dirty,mpki,ipki);//,xipki);
 //  printf("Perf Relative %f\n",relative_perf);
 
-  if(relative_perf > 1){
-      if(cmode == inclusive)
-        printf("******************Switch to Exclusive\n");
-      cmode = exclusive;
-      myl2cp->pexclusive++;
+  if(flag == TRUE){
+      if(relative_perf > 1){
+          if(cmode == inclusive)
+            printf("******************Switch to Exclusive\n");
+          cmode = exclusive;
+          myl2cp->pexclusive++;
+        }
+      else{
+          if(cmode == exclusive)
+            printf("******************Switch to Exclusive\n");
+          cmode = inclusive;
+          myl2cp->pinclusive++;
+        }
+      if(ipki > 20){
+//          printf("******************HIGH IPKI Detected\n");
+          low_ipki = TRUE;
+        }
+      else low_ipki = FALSE;
     }
-  else{
-      if(cmode == exclusive)
-        printf("******************Switch to Exclusive\n");
-      cmode = inclusive;
-      myl2cp->pinclusive++;
-    }
-  if(ipki > 20){
-      printf("******************HIGH IPKI Detected\n");
-      low_ipki = TRUE;
-    }
-  else low_ipki = FALSE;
-
   myl2cp->valid = valid;
   myl2cp->dirty = dirty;
   myl2cp->ipki_sum = (ex_l2_to_l3-ninc_l2_to_l3)*1000;
