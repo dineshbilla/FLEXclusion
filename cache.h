@@ -276,7 +276,7 @@ cache_stats(struct cache_t *cp,		/* cache instance */
 
 /* print cache stats */
 void cache_stats(struct cache_t *cp, FILE *stream);
-void set_mode(void);
+void set_mode(int flag);
 /* access a cache, perform a CMD operation on cache CP at address ADDR,
    places NBYTES of data at *P, returns latency of operation if initiated
    at NOW, places pointer to block user data in *UDATA, *P is untouched if

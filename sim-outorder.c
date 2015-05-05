@@ -4792,7 +4792,7 @@ sim_main(void)
       if (max_insts && sim_num_insn >= max_insts)
 	return;
       if(sim_num_insn %100000 == 0){
-          set_mode();
+          set_mode(TRUE);
         }
     }
 }
