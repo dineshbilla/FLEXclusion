@@ -2922,7 +2922,7 @@ ruu_issue(void)
 				  load_lat =
 				    cache_access(cache_dl1, Read,
 						 (rs->addr & ~3), NULL, 4,
-						 sim_cycle, NULL, NULL,NULL);
+						 sim_cycle, NULL, NULL,cache_dl2);
 				  if (load_lat > cache_dl1_lat)
 				    events |= PEV_CACHEMISS;
 				}
@@ -4422,7 +4422,7 @@ ruu_fetch(void)
 	      lat =
 		cache_access(cache_il1, Read, IACOMPRESS(fetch_regs_PC),
 			     NULL, ISCOMPRESS(sizeof(md_inst_t)), sim_cycle,
-			     NULL, NULL,NULL);
+			     NULL, NULL,cache_il2);
 	      if (lat > cache_il1_lat)
 		last_inst_missed = TRUE;
 	    }
@@ -4791,5 +4791,8 @@ sim_main(void)
       /* finish early? */
       if (max_insts && sim_num_insn >= max_insts)
 	return;
+      if(sim_num_insn %100000 == 0){
+          set_mode();
+        }
     }
 }

@@ -219,9 +219,12 @@ struct cache_t
   counter_t invalidations;	/* total number of external invalidations */
 
   counter_t ipki_sum;
-  counter_t inc_l3_traffic;
-  counter_t ex_l3_traffic;
-
+  counter_t dirty;
+  counter_t valid;
+  counter_t ex_l3_miss;
+  counter_t ninc_l3_miss;
+  counter_t pexclusive;
+  counter_t pinclusive;
 
   /* last block to hit, used to optimize cache hit processing */
   md_addr_t last_tagset;	/* tag of last line accessed */
@@ -273,7 +276,7 @@ cache_stats(struct cache_t *cp,		/* cache instance */
 
 /* print cache stats */
 void cache_stats(struct cache_t *cp, FILE *stream);
-
+void set_mode(void);
 /* access a cache, perform a CMD operation on cache CP at address ADDR,
    places NBYTES of data at *P, returns latency of operation if initiated
    at NOW, places pointer to block user data in *UDATA, *P is untouched if
