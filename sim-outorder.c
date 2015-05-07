@@ -4791,7 +4791,7 @@ sim_main(void)
       /* finish early? */
       if (max_insts && sim_num_insn >= max_insts)
 	return;
-      if(sim_num_insn %100000 == 0){
+      if(sim_num_insn %10000 == 0){
           set_mode(TRUE);
         }
     }
